@@ -1196,6 +1196,99 @@ func TestCreateVolume(t *testing.T) {
 			},
 		},
 		{
+			name: "Success: reuseAccessPointScope namespace produces different tokens for same PVC name in different namespaces",
+			testFunc: func(t *testing.T) {
+				paramsA := map[string]string{
+					PvcNameKey:            "data",
+					PvcNamespace:          "team-a",
+					ReuseAccessPointScope: "namespace",
+				}
+				paramsB := map[string]string{
+					PvcNameKey:            "data",
+					PvcNamespace:          "team-b",
+					ReuseAccessPointScope: "namespace",
+				}
+				tokenA, err := reuseClientToken(paramsA)
+				if err != nil {
+					t.Fatalf("reuseClientToken for team-a failed: %v", err)
+				}
+				tokenB, err := reuseClientToken(paramsB)
+				if err != nil {
+					t.Fatalf("reuseClientToken for team-b failed: %v", err)
+				}
+				if tokenA == tokenB {
+					t.Fatalf("Cross-namespace collision: same token %q for different namespaces", tokenA)
+				}
+			},
+		},
+		{
+			name: "Success: reuseAccessPointScope empty scope produces same token regardless of namespace",
+			testFunc: func(t *testing.T) {
+				paramsA := map[string]string{
+					PvcNameKey:            "data",
+					PvcNamespace:          "team-a",
+					ReuseAccessPointScope: "",
+				}
+				paramsB := map[string]string{
+					PvcNameKey:            "data",
+					PvcNamespace:          "team-b",
+					ReuseAccessPointScope: "",
+				}
+				tokenA, _ := reuseClientToken(paramsA)
+				tokenB, _ := reuseClientToken(paramsB)
+				if tokenA != tokenB {
+					t.Fatalf("Empty scope should produce same token regardless of namespace, got %q vs %q", tokenA, tokenB)
+				}
+			},
+		},
+		{
+			name: "Success: reuseAccessPointScope default (empty) behaves like empty scope",
+			testFunc: func(t *testing.T) {
+				paramsDefault := map[string]string{
+					PvcNameKey:   "data",
+					PvcNamespace: "team-a",
+				}
+				paramsGlobal := map[string]string{
+					PvcNameKey:            "data",
+					PvcNamespace:          "team-a",
+					ReuseAccessPointScope: "",
+				}
+				tokenDefault, _ := reuseClientToken(paramsDefault)
+				tokenGlobal, _ := reuseClientToken(paramsGlobal)
+				if tokenDefault != tokenGlobal {
+					t.Fatalf("Default scope should match empty scope, got %q vs %q", tokenDefault, tokenGlobal)
+				}
+			},
+		},
+		{
+			name: "Fail: reuseAccessPointScope namespace rejects empty namespace",
+			testFunc: func(t *testing.T) {
+				params := map[string]string{
+					PvcNameKey:            "data",
+					PvcNamespace:          "",
+					ReuseAccessPointScope: "namespace",
+				}
+				_, err := reuseClientToken(params)
+				if err == nil {
+					t.Fatal("Expected error for empty namespace with scope=namespace")
+				}
+			},
+		},
+		{
+			name: "Fail: reuseAccessPointScope invalid value",
+			testFunc: func(t *testing.T) {
+				params := map[string]string{
+					PvcNameKey:            "data",
+					PvcNamespace:          "test-ns",
+					ReuseAccessPointScope: "invalid",
+				}
+				_, err := reuseClientToken(params)
+				if err == nil {
+					t.Fatal("Expected error for invalid scope value")
+				}
+			},
+		},
+		{
 			name: "Fail: reuseAccessPoint precheck rejects existing access point that violates requested StorageClass basePath and UID/GID",
 			testFunc: func(t *testing.T) {
 				// reuseAccessPoint precheck must validate the existing access

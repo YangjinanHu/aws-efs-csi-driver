@@ -69,6 +69,7 @@ const (
 	TempMountPathPrefix    = "/var/lib/csi/pv"
 	Uid                    = "uid"
 	ReuseAccessPointKey    = "reuseAccessPoint"
+	ReuseAccessPointScope  = "reuseAccessPointScope"
 	PvcNameKey             = "csi.storage.k8s.io/pvc/name"
 	CrossAccount           = "crossaccount"
 	ApLockWaitTimeSec      = 3
@@ -98,15 +99,19 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 	volName := req.GetName()
 	clientToken := volName
 
-	// if true, then use sha256 hash of pvcName as clientToken instead of PVC Id
-	// This allows users to reconnect to the same AP from different k8s cluster
+	// if true, derive the client token from the PVC identity so the same PVC
+	// can reconnect to its access point. The scope (global vs namespace) controls
+	// whether the namespace is included in the token.
 	if reuseAccessPointStr, ok := volumeParams[ReuseAccessPointKey]; ok {
 		reuseAccessPoint, err = strconv.ParseBool(reuseAccessPointStr)
 		if err != nil {
 			return nil, status.Error(codes.InvalidArgument, "Invalid value for reuseAccessPoint parameter")
 		}
 		if reuseAccessPoint {
-			clientToken = get64LenHash(volumeParams[PvcNameKey])
+			clientToken, err = reuseClientToken(volumeParams)
+			if err != nil {
+				return nil, err
+			}
 			klog.V(5).Infof("Client token : %s", clientToken)
 		}
 	}
@@ -200,8 +205,9 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 		return nil, status.Errorf(codes.InvalidArgument, "Missing %v parameter", ProvisioningMode)
 	}
 
-	// if true, then use sha256 hash of pvcName as clientToken instead of PVC Id
-	// This allows users to reconnect to the same AP from different k8s cluster
+	// if true, derive the client token from the PVC identity so the same PVC
+	// can reconnect to its access point. The scope (global vs namespace) controls
+	// whether the namespace is included in the token.
 	if reuseAccessPointStr, ok := volumeParams[ReuseAccessPointKey]; ok {
 		if fsType == util.FileSystemTypeS3Files {
 			return nil, status.Errorf(codes.InvalidArgument, "Parameter %v is only supported for EFS file systems, not supported for %v file systems", ReuseAccessPointKey, fsType)
@@ -212,7 +218,10 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 			return nil, status.Error(codes.InvalidArgument, "Invalid value for reuseAccessPoint parameter")
 		}
 		if reuseAccessPoint {
-			clientToken = get64LenHash(volumeParams[PvcNameKey])
+			clientToken, err = reuseClientToken(volumeParams)
+			if err != nil {
+				return nil, err
+			}
 			klog.V(5).Infof("Client token : %s", clientToken)
 		}
 	}
@@ -866,6 +875,33 @@ func get64LenHash(text string) string {
 	h := sha256.New()
 	h.Write([]byte(text))
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// reuseClientToken computes the client token for access point reuse based on
+// the configured scope. When scope is "namespace", the token incorporates both
+// the PVC namespace and name, preventing cross-namespace collisions. The default
+// scope (empty/unset) uses the PVC name only for backwards compatibility,
+// preserving cross-cluster reconnection where namespaces may differ.
+func reuseClientToken(volumeParams map[string]string) (string, error) {
+	scope := volumeParams[ReuseAccessPointScope]
+	name := volumeParams[PvcNameKey]
+
+	switch scope {
+	case "namespace":
+		ns := volumeParams[PvcNamespace]
+		if ns == "" || name == "" {
+			return "", status.Error(codes.InvalidArgument,
+				"reuseAccessPointScope \"namespace\" requires PVC namespace and name; ensure the external-provisioner sidecar has --extra-create-metadata enabled")
+		}
+		return get64LenHash(ns + "/" + name), nil
+	case "":
+		// Default: use PVC name only for backwards compatibility.
+		// This allows cross-cluster reconnection where namespaces may differ.
+		return get64LenHash(name), nil
+	default:
+		return "", status.Errorf(codes.InvalidArgument,
+			"Invalid value for reuseAccessPointScope: %q (must be \"namespace\" or omitted)", scope)
+	}
 }
 
 // buildAccessPointTags returns the tags applied to a new access point: the
