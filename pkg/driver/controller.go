@@ -550,6 +550,7 @@ func (d *Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest)
 				}
 			}
 		}
+		mountOptions = forceS3FilesNFSClient(fsType, mountOptions)
 
 		// Create the target directory, This won't fail if it already exists
 		if err := d.mounter.MakeDir(fsRoot); err != nil {

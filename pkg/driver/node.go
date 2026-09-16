@@ -78,6 +78,7 @@ const (
 	maxInflightMountCallsReached        = "The number of concurrent mount calls is %v, which has reached the limit"
 	GiB                                 = 1024 * 1024 * 1024
 	minMemoryInBytesToEnableS3ReadCache = 30 * GiB
+	s3FilesNFSClientMountOption         = "fsType=nfs"
 )
 
 type efsVolumeMeta struct {
@@ -305,13 +306,7 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 			}
 		}
 	}
-	if fsType == util.FileSystemTypeS3Files {
-		memoryLimitInBytes := getCsiNodeEfsPluginContainerMemoryLimitInBytes()
-		if memoryLimitInBytes < minMemoryInBytesToEnableS3ReadCache {
-			klog.Infof("CSI node memory limit %d bytes is below minimum %d bytes required to enable S3 read cache. Adding nos3readcache into mount option.", memoryLimitInBytes, minMemoryInBytesToEnableS3ReadCache)
-			mountOptions = append(mountOptions, "nos3readcache")
-		}
-	}
+	mountOptions = forceS3FilesNFSClient(fsType, mountOptions)
 
 	klog.V(5).Infof("NodePublishVolume: creating dir %s", target)
 	if err := d.mounter.MakeDir(target); err != nil {
@@ -690,6 +685,21 @@ func hasOption(options []string, opt string) bool {
 		}
 	}
 	return false
+}
+
+func forceS3FilesNFSClient(fsType util.FileSystemType, mountOptions []string) []string {
+	if fsType != util.FileSystemTypeS3Files {
+		return mountOptions
+	}
+
+	filtered := make([]string, 0, len(mountOptions)+1)
+	for _, option := range mountOptions {
+		if strings.EqualFold(strings.SplitN(option, "=", 2)[0], "fsType") {
+			continue
+		}
+		filtered = append(filtered, option)
+	}
+	return append(filtered, s3FilesNFSClientMountOption)
 }
 
 // efsMetaPath hashes the cleaned target so consumers can derive it from mountinfo.

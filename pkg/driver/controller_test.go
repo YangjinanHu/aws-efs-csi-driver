@@ -4585,6 +4585,69 @@ func TestDeleteVolume(t *testing.T) {
 			},
 		},
 		{
+			name: "Success: S3Files cleanup mount uses NFS client",
+			testFunc: func(t *testing.T) {
+				mockCtl := gomock.NewController(t)
+				mockCloud := mocks.NewMockCloud(mockCtl)
+				mockMounter := mocks.NewMockMounter(mockCtl)
+
+				driver := &Driver{
+					endpoint:                 endpoint,
+					cloud:                    mockCloud,
+					mounter:                  mockMounter,
+					gidAllocator:             NewGidAllocator(),
+					lockManager:              NewLockManagerMap(),
+					deleteAccessPointRootDir: true,
+				}
+
+				req := &csi.DeleteVolumeRequest{
+					VolumeId: "s3files:fs-abcd1234::fsap-abcd1234",
+				}
+
+				accessPoint := &cloud.AccessPoint{
+					AccessPointId:      apId,
+					FileSystemId:       fsId,
+					AccessPointRootDir: "/testDir",
+				}
+				dirPresent := mocks.NewMockFileInfo(
+					"testFile",
+					0,
+					0755,
+					time.Now(),
+					true,
+					nil,
+				)
+
+				ctx := context.Background()
+				mockMounter.EXPECT().MakeDir(gomock.Any()).Return(nil)
+				mockMounter.EXPECT().IsLikelyNotMountPoint(gomock.Any()).Return(true, nil)
+				mockMounter.EXPECT().Mount(
+					gomock.Eq(fsId),
+					gomock.Any(),
+					gomock.Eq("s3files"),
+					gomock.Eq([]string{"tls", "iam", "fsType=nfs"}),
+				).Return(nil)
+				mockMounter.EXPECT().Stat(gomock.Any()).Return(dirPresent, nil)
+				mockMounter.EXPECT().Unmount(gomock.Any()).Return(nil)
+				mockCloud.EXPECT().DescribeAccessPoint(
+					gomock.Eq(ctx),
+					gomock.Eq(apId),
+					gomock.Eq(fsId),
+					gomock.Eq(util.FileSystemTypeS3Files),
+				).Return(accessPoint, nil)
+				mockCloud.EXPECT().DeleteAccessPoint(
+					gomock.Eq(ctx),
+					gomock.Eq(apId),
+					gomock.Eq(util.FileSystemTypeS3Files),
+				).Return(nil)
+
+				if _, err := driver.DeleteVolume(ctx, req); err != nil {
+					t.Fatalf("Delete Volume failed: %v", err)
+				}
+				mockCtl.Finish()
+			},
+		},
+		{
 			name: "Success: Race Delete with deleteAccessPointRootDir",
 			testFunc: func(t *testing.T) {
 				const numGoRoutines = 100
