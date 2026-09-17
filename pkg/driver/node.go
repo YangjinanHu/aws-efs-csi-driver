@@ -306,6 +306,13 @@ func (d *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolu
 			}
 		}
 	}
+	if fsType == util.FileSystemTypeS3Files {
+		memoryLimitInBytes := getCsiNodeEfsPluginContainerMemoryLimitInBytes()
+		if memoryLimitInBytes < minMemoryInBytesToEnableS3ReadCache {
+			klog.Infof("CSI node memory limit %d bytes is below minimum %d bytes required to enable S3 read cache. Adding nos3readcache into mount option.", memoryLimitInBytes, minMemoryInBytesToEnableS3ReadCache)
+			mountOptions = append(mountOptions, "nos3readcache")
+		}
+	}
 	mountOptions = forceS3FilesNFSClient(fsType, mountOptions)
 
 	klog.V(5).Infof("NodePublishVolume: creating dir %s", target)

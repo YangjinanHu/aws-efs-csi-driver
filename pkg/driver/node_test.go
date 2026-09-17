@@ -762,7 +762,7 @@ func TestNodePublishVolume(t *testing.T) {
 			mountSuccess:  true,
 		},
 		{
-			name: "success: S3Files uses NFS client when memory limit is low",
+			name: "success: S3Files preserves memory limit handling with NFS client",
 			req: &csi.NodePublishVolumeRequest{
 				VolumeId:         "s3files:fs-abcd1234::fsap-abcd1234",
 				VolumeCapability: stdVolCap,
@@ -770,7 +770,7 @@ func TestNodePublishVolume(t *testing.T) {
 			},
 			csiNodeMemoryLimit: "1073741824",
 			expectMakeDir:      true,
-			mountArgs:          []interface{}{"fs-abcd1234:/", targetPath, "s3files", []string{"accesspoint=fsap-abcd1234", "tls", "fsType=nfs"}},
+			mountArgs:          []interface{}{"fs-abcd1234:/", targetPath, "s3files", []string{"accesspoint=fsap-abcd1234", "tls", "nos3readcache", "fsType=nfs"}},
 			mountSuccess:       true,
 		},
 		{
